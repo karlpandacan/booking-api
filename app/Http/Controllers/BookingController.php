@@ -17,78 +17,27 @@ use App\Models\Room;
 use App\Models\Booking;
 use DateInterval;
 
+use App\Repositories\BookingRepository;
+
 class BookingController extends Controller
 {
+    protected $bookingRepository;
+
+    public function __construct(BookingRepository $bookingRepository)
+    {
+        $this->bookingRepository = $bookingRepository;
+    }
+
     public function index(Request $request)
     {
-        $params = new StdClass();
-        $params->dateFrom = $request->date_from ?? date('Y-m-d');
-        $params->dateTo = $request->date_to ?? date('Y-m-d');
-        $search = $request->search ?? "";
-        $myBookings = $request->mybooking ?? 0;
-        $bookings = Booking::filterDate($params)->search($search)
-            ->with(['room', 'user']);
-        if ($myBookings == 1) {
-            $bookings = $bookings->where('user_id', $request->userId);
-        }
-        if ($request->has('sort')) {
-            $sort = $request->sort;
-            $sord = $request->sord;
-            switch ($sort) {
-                case 'fullname':
-                    $bookings = $bookings->with(['user' => fn ($query) => $query->orderBy('fullname', $sord)]);
-                    break;
-                case 'room':
-                    $bookings = $bookings->with(['room' => fn ($query) => $query->orderBy('name', $sord)]);
-                    break;
-                case 'date':
-                case 'time_from':
-                    $bookings = $bookings->orderBy('date_from', $request->sord);
-                    break;
-                case 'time_to':
-                    $bookings = $bookings->orderBy('date_to', $request->sord);
-                    break;
-                default:
-                    $bookings = $bookings->orderBy($request->sort, $request->sord);
-                    break;
-            }
-        }
-
-        $bookings = $bookings->paginate(Booking::PER_PAGES);
+        $params = $request->all();
 
         $response = new StdClass();
-        $response->headers = [
-            (object) ['text' => 'User', 'align' => 'center', 'value' => 'fullname'],
-            (object) ['text' => 'Date', 'align' => 'center', 'value' => 'date'],
-            (object) ['text' => 'Room', 'align' => 'center', 'value' => 'room'],
-            (object) ['text' => 'Time From', 'align' => 'center', 'value' => 'time_from'],
-            (object) ['text' => 'Time To', 'align' => 'center', 'value' => 'time_to'],
-        ];
-        if ($request->userId != "") {
-            $response->headers[] = (object) ['text' => 'Actions', 'align' => 'center', 'sortable' => false, 'value' => 'actions'];
-        }
+        $response->headers = $this->bookingRepository->listHeader();
 
-        $response->data = [];
-        $items = $bookings->items();
-        if (!empty($items)) {
-            foreach ($items as $item) {
-                $response->data[] = (object)[
-                    'id' => $item->id,
-                    'fullname' => $item->user->fullname,
-                    'date' => $item->date_from->format('Y-m-d'),
-                    'room' => $item->room->name,
-                    'time_from' => $item->date_from->format('H:i:s'),
-                    'time_to' => $item->date_to->format('H:i:s'),
-                ];
-            }
-        }
-
-        $response->pagination = new StdClass();
-        $response->pagination->total = $bookings->total();
-        $response->pagination->first_item = $bookings->firstItem();
-        $response->pagination->last_item = $bookings->lastItem();
-        $response->pagination->current_page = $bookings->currentPage();
-        $response->pagination->last_page = $bookings->lastPage();
+        $data = $this->bookingRepository->getData($params);
+        $response->data = $data->data;
+        $response->pagination = $data->pagination;
 
         $this->setMessage('Success Getting Bookings');
         return $this->sendResponse($response);
@@ -111,19 +60,12 @@ class BookingController extends Controller
     public function store(Request $request)
     {
         try {
-            $dateFrom = $request->date . " " . $request->time;
-            $newDateTime = new \DateTime($dateFrom);
-            $dateInterval = $request->time_stap == '1hour' ? 'PT1H' : 'PT30M';
-            $dateTo = $newDateTime->add(new DateInterval($dateInterval))->format('Y-m-d H:i:s');
-            $booking = new Booking();
-            $booking->user_id = $request->userId;
-            $booking->room_id = $request->room;
-            $booking->date_from = $dateFrom;
-            $booking->date_to = $dateTo;
-            $booking->save();
-
-            $this->setMessage('Success booking a room.');
-            return $this->sendResponse([]);
+            $data = $request->all();
+            $result = $this->bookingRepository->store($data);
+            $this->setStatus($result->success === true ? 200 : 500);
+            $this->setSuccess($result->success);
+            $this->setMessage($result->message);
+            return $this->sendResponse($result->response);
         } catch (Throwable $exception) {
             $this->setStatus(500);
             $this->setSuccess(false);
@@ -137,7 +79,7 @@ class BookingController extends Controller
         try {
             $dateFrom = $request->date . " " . $request->time;
             $newDateTime = new \DateTime($dateFrom);
-            $dateInterval = $request->time_stap == '1hour' ? 'PT1H' : 'PT30M';
+            $dateInterval = $request->time_span == '1hour' ? 'PT1H' : 'PT30M';
             $dateTo = $newDateTime->add(new DateInterval($dateInterval))->format('Y-m-d H:i:s');
             $booking->room_id = $request->room;
             $booking->date_from = $dateFrom;
